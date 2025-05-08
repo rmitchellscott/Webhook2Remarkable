@@ -5,6 +5,9 @@ import subprocess
 import requests
 from flask import Flask, request, jsonify
 
+import functools
+print = functools.partial(print, flush=True)
+
 # Setup
 app = Flask(__name__)
 PDF_DIR = os.getenv('PDF_DIR', '/app/pdfs')
@@ -14,9 +17,6 @@ RM_DIR = os.getenv('RM_TARGET_DIR', '/')
 
 # Helpers
 def download_pdf(url):
-    """
-    Download a PDF from the given URL with custom headers to mimic a real browser.
-    """
     os.makedirs(PDF_DIR, exist_ok=True)
     local_name = url.split('/')[-1]
     local_path = os.path.join(PDF_DIR, local_name)
@@ -41,16 +41,10 @@ def rename_and_upload(path):
     new_name = today.strftime("%B %-d %Y") + ".pdf"
     new_path = os.path.join(PDF_DIR, new_name)
     os.rename(path, new_path)
-    # subprocess.run(["rmapi", "login", "--username", RM_USER, "--password", RM_PASS], check=True)
     subprocess.run(["rmapi", "put", new_path, RM_DIR], check=True)
     return new_path
 
 def cleanup_old():
-    """
-    Remove files in RM_DIR whose names are exactly "Month D YYYY" and older than 7 days.
-    """
-    import datetime, subprocess, os
-
     today = datetime.date.today()
     cutoff = today - datetime.timedelta(days=7)
 
@@ -65,13 +59,10 @@ def cleanup_old():
         if not parts or parts[0] != "[f]":
             continue
 
-        # join _all_ tokens after "[f]" to reconstruct the full filename
-        filename = " ".join(parts[1:])  # e.g. "May 5 2025"
-
+        filename = " ".join(parts[1:])
         try:
             file_date = datetime.datetime.strptime(filename, "%B %d %Y").date()
         except ValueError:
-            # filename isn’t exactly Month D YYYY → skip
             continue
 
         if file_date < cutoff:
@@ -79,24 +70,28 @@ def cleanup_old():
             print(f"Removing {remote_path} (dated {file_date})")
             subprocess.run(["rmapi", "rm", remote_path], check=True)
 
-
-# Webhook endpoint
+# Webhook endpoint for voip.ms
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    data = request.json or {}
-    text = data.get('text', '')
-    # extract the first URL
+    print("Headers:", dict(request.headers))
+    print("Request data (form):", request.form)
+    print("Request data (json):", request.get_json(silent=True))
+    print("Raw body:", request.data)
+
+    data = request.form.to_dict()
+    text = data.get('message', '')
+    if not text:
+        return jsonify({'status': 'error', 'message': 'No message found'}), 400
+
     match = re.search(r'https?://[^\s]+', text)
     if not match:
         return jsonify({'status': 'error', 'message': 'No URL found in message'}), 400
 
-    url = match.group(0)
     try:
-        local_path = download_pdf(url)
+        local_path = download_pdf(match.group(0))
         uploaded = rename_and_upload(local_path)
         cleanup_old()
         return jsonify({'status': 'ok', 'uploaded': uploaded})
-        # return jsonify({'status': 'ok'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
