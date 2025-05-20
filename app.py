@@ -14,7 +14,7 @@ app = Flask(__name__)
 PDF_DIR      = os.getenv('PDF_DIR', '/app/pdfs')
 RM_USER      = os.getenv('REMARKABLE_USER')
 RM_PASS      = os.getenv('REMARKABLE_PASS')
-RM_DIR       = os.getenv('RM_TARGET_DIR', '/')
+DEFAULT_RM_DIR  = os.getenv('RM_TARGET_DIR', '/')
 GS_COMPAT    = '1.4'
 GS_SETTINGS  = '/ebook'
 
@@ -45,7 +45,7 @@ def download_pdf(url, tmp=False):
 
     return local_path
 
-def compress_pdf(path):
+def cleanup_old(prefix='', rm_dir=DEFAULT_RM_DIR):
     """
     Use Ghostscript to compress the PDF at `path`. Returns the path to the compressed file.
     """
@@ -63,7 +63,7 @@ def compress_pdf(path):
     ], check=True)
     return compressed_path
 
-def rename_and_upload(path, prefix=''):
+def rename_and_upload(path, prefix='', rm_dir=DEFAULT_RM_DIR):
     """
     1) Move `path` into PDF_DIR as "<prefix> Month D.pdf"
     2) Upload that file via rmapi
@@ -81,7 +81,7 @@ def rename_and_upload(path, prefix=''):
 
     # 3. Upload the yearless file
     subprocess.run(
-        ["rmapi", "put", no_year_path, RM_DIR],
+        ["rmapi", "put", no_year_path, rm_dir],
         check=True
     )
 
@@ -91,70 +91,6 @@ def rename_and_upload(path, prefix=''):
     os.rename(no_year_path, with_year_path)
 
     return with_year_path
-
-# def cleanup_old(prefix=''):
-#     """
-#     Remove files in RM_DIR named "<prefix> Month D.pdf" older than 7 days.
-#     """
-#     today  = datetime.date.today()
-#     cutoff = today - datetime.timedelta(days=7)
-
-#     # list remote files
-#     proc = subprocess.run(
-#         ["rmapi", "ls", RM_DIR],
-#         capture_output=True, text=True, check=True
-#     )
-#     for line in proc.stdout.splitlines():
-#         # only files
-#         if not line.startswith("[f] "):
-#             continue
-#         filename = line[4:]  # strip "[f] "
-
-#         # prefix filter
-#         if prefix and not filename.startswith(prefix + " "):
-#             continue
-#         if not filename.lower().endswith(".pdf"):
-#             continue
-
-#         # strip .pdf and split into tokens
-#         name = filename[:-4]
-#         parts = name.split()
-#         # if prefix: drop its words
-#         if prefix:
-#             prefix_words = prefix.split()
-#             if parts[:len(prefix_words)] != prefix_words:
-#                 continue
-#             parts = parts[len(prefix_words):]
-
-#         # now expect exactly [Month, Day]
-#         if len(parts) != 2:
-#             continue
-#         month_str, day_str = parts
-
-#         # parse month/day
-#         try:
-#             month = list(calendar.month_name).index(month_str)
-#             day   = int(day_str)
-#         except ValueError:
-#             print("⚠️ couldn’t parse date from:", filename)
-#             continue
-
-#         # assign a year, adjusting for year‐crossing
-#         file_date = datetime.date(today.year, month, day)
-#         if file_date > today:
-#             # e.g. “Dec 30” when today is Jan 5 → last year
-#             file_date = datetime.date(today.year - 1, month, day)
-
-#         # finally compare
-#         if file_date < cutoff:
-#             remote_path = os.path.join(RM_DIR, filename)
-#             print(f"Removing {remote_path} (dated {file_date})")
-#             subprocess.run(["rmapi", "rm", remote_path], check=True)
-
-import os
-import datetime
-import subprocess
-import calendar
 
 def cleanup_old(prefix=''):
     """
@@ -167,7 +103,7 @@ def cleanup_old(prefix=''):
 
     # 1) list remote files
     proc = subprocess.run(
-        ["rmapi", "ls", RM_DIR],
+        ["rmapi", "ls", rm_dir],
         capture_output=True, text=True, check=True
     )
     lines = proc.stdout.splitlines()
@@ -229,7 +165,7 @@ def cleanup_old(prefix=''):
 
         # 7) compare against cutoff
         if file_date < cutoff:
-            remote_path = os.path.join(RM_DIR, filename)
+            remote_path = os.path.join(rm_dir, filename)
             print(f"  ↳ Removing {remote_path} (dated {file_date} < {cutoff})")
             subprocess.run(["rmapi", "rm", remote_path], check=True)
         else:
@@ -253,28 +189,43 @@ def webhook():
     print(f"From: {sender}, Body: {text}")
     print(f"Prefix: '{prefix}', Compress: {compress}")
 
+    manage_str = request.form.get('manage', 'false').strip().lower()
+    manage     = manage_str in ('true', '1', 'yes')
+    print(f"Manage: {manage!r}, Prefix: {prefix!r}, Compress: {compress}")
+
+    rm_dir_param = request.form.get('rm_dir', '').strip()
+    rm_dir       = rm_dir_param or DEFAULT_RM_DIR
+
     match = re.search(r'https?://[^\s]+', text)
     if not match:
         print("❌ No URL found in message")
         return jsonify({'status': 'error', 'message': 'No URL found in message'}), 400
 
+
+    # 1. Download
+    local_path = download_pdf(match.group(0), tmp=compress)
+
+    # 2. Optionally compress
+    if compress:
+        print("🔧 Compressing PDF via Ghostscript")
+        local_path = compress_pdf(local_path)
+
     try:
-        # 1. Download
-        local_path = download_pdf(match.group(0), tmp=compress)
+        if manage:
+            # 3a. If managing: do your prefix/rename logic (it uploads once, inside rename_and_upload)
+            print("📤 Managed upload + rename …")
+            uploaded = rename_and_upload(local_path, prefix)
+            cleanup_old(prefix)
+            print("✅ Managed upload successful:", uploaded)
+        else:
+            # 3b. If not managing: just one raw upload, no extra rename or cleanup
+            print("📤 Simple upload (no rename/cleanup) …")
+            subprocess.run(["rmapi", "put", local_path, rm_dir], check=True)
+            uploaded = os.path.join(rm_dir, os.path.basename(local_path))
+            print("ℹ️ Uploaded without rename/cleanup:", uploaded)
 
-        # 2. Optionally compress
-        if compress:
-            print("🔧 Compressing PDF via Ghostscript")
-            local_path = compress_pdf(local_path)
-
-        # 3. Rename & upload (adds prefix into filename if given)
-        uploaded = rename_and_upload(local_path, prefix)
-
-        # 4. Cleanup old files (matching this prefix)
-        cleanup_old(prefix)
-
-        print("✅ Upload successful:", uploaded)
         return jsonify({'status': 'ok', 'uploaded': uploaded})
+
     except Exception as e:
         print(f"❌ Exception: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
