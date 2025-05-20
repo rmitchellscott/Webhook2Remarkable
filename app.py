@@ -6,6 +6,7 @@ import requests
 from flask import Flask, request, jsonify
 import functools
 import shutil
+import calendar
 
 print = functools.partial(print, flush=True)
 
@@ -20,12 +21,18 @@ GS_SETTINGS  = '/ebook'
 
 # Helpers
 
-def download_pdf(url, tmp=False):
+def download_pdf(url, tmp=False, prefix=''):
     """
     Download a PDF from the given URL into either /tmp (if tmp=True)
-    or PDF_DIR (if tmp=False), and return the local path.
+    or into a folder under PDF_DIR matching prefix (if provided),
+    and return the local path.
     """
-    dest_dir = '/tmp' if tmp else PDF_DIR
+    # Determine destination directory
+    if tmp:
+        dest_dir = '/tmp'
+    else:
+        # use prefix-named subfolder if prefix provided
+        dest_dir = os.path.join(PDF_DIR, prefix) if prefix else PDF_DIR
     os.makedirs(dest_dir, exist_ok=True)
 
     local_name = url.split('/')[-1]
@@ -63,20 +70,40 @@ def cleanup_old(prefix='', rm_dir=DEFAULT_RM_DIR):
     ], check=True)
     return compressed_path
 
+def compress_pdf(path):
+    """
+    Use Ghostscript to compress the PDF at `path`. Returns the path to the compressed file.
+    """
+    base, ext = os.path.splitext(path)
+    compressed_path = f"{base}_compressed{ext}"
+    subprocess.run([
+        "gs",
+        "-sDEVICE=pdfwrite",
+        f"-dCompatibilityLevel={GS_COMPAT}",
+        f"-dPDFSETTINGS={GS_SETTINGS}",
+        "-dNOPAUSE",
+        "-dBATCH",
+        f"-sOutputFile={compressed_path}",
+        path
+    ], check=True)
+    return compressed_path
+
 def rename_and_upload(path, prefix='', rm_dir=DEFAULT_RM_DIR):
     """
     1) Move `path` into PDF_DIR as "<prefix> Month D.pdf"
     2) Upload that file via rmapi
     3) Rename the local copy to "<prefix> Month D YYYY.pdf"
     """
+
+    target_dir = os.path.join(PDF_DIR, prefix) if prefix else PDF_DIR
+    os.makedirs(target_dir, exist_ok=True)
     # 1. Build date strings
     today = datetime.date.today()
     month, day, year = today.strftime("%B"), str(today.day), str(today.year)
 
-    # 2. Local no-year filename → move into PDF_DIR
+    # 2. Local no-year filename → move into target_dir
     no_year_name = f"{prefix} {month} {day}.pdf" if prefix else f"{month} {day}.pdf"
-    os.makedirs(PDF_DIR, exist_ok=True)
-    no_year_path = os.path.join(PDF_DIR, no_year_name)
+    no_year_path = os.path.join(target_dir, no_year_name)
     shutil.move(path, no_year_path)
 
     # 3. Upload the yearless file
@@ -87,12 +114,12 @@ def rename_and_upload(path, prefix='', rm_dir=DEFAULT_RM_DIR):
 
     # 4. Rename local file to include the year
     with_year_name = f"{prefix} {month} {day} {year}.pdf" if prefix else f"{month} {day} {year}.pdf"
-    with_year_path = os.path.join(PDF_DIR, with_year_name)
+    with_year_path = os.path.join(target_dir, with_year_name)
     os.rename(no_year_path, with_year_path)
 
     return with_year_path
 
-def cleanup_old(prefix=''):
+def cleanup_old(prefix='', rm_dir=DEFAULT_RM_DIR):
     """
     Remove files in RM_DIR named "<prefix> Month D.pdf" older than 7 days,
     with detailed debug logs.
@@ -203,7 +230,7 @@ def webhook():
 
 
     # 1. Download
-    local_path = download_pdf(match.group(0), tmp=compress)
+    local_path = download_pdf(match.group(0), tmp=compress, prefix=prefix)
 
     # 2. Optionally compress
     if compress:
@@ -214,7 +241,7 @@ def webhook():
         if manage:
             # 3a. If managing: do your prefix/rename logic (it uploads once, inside rename_and_upload)
             print("📤 Managed upload + rename …")
-            uploaded = rename_and_upload(local_path, prefix)
+            uploaded = rename_and_upload(local_path, prefix, rm_dir)
             cleanup_old(prefix)
             print("✅ Managed upload successful:", uploaded)
         else:
