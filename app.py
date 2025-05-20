@@ -7,6 +7,7 @@ from flask import Flask, request, jsonify
 import functools
 import shutil
 import calendar
+from threading import Thread
 
 print = functools.partial(print, flush=True)
 
@@ -198,33 +199,28 @@ def cleanup_old(prefix='', rm_dir=DEFAULT_RM_DIR):
         # else:
         #     print(f"  ↳ Keeping {filename} (dated {file_date} ≥ {cutoff})")
 
+def process_pdf(form):
+    print("Request form data:", form)
+    print("Request body:", form.get('Body', ''))
 
-# Webhook endpoint
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    print(">>> Incoming request to /webhook")
-    print("Request headers:", dict(request.headers))
-    print("Request form data:", request.form)
-    print("Request body:", request.data.decode('utf-8', errors='replace'))
-
-    prefix       = request.form.get('prefix', '').strip()
-    compress_str = request.form.get('compress', 'false').strip().lower()
+    prefix       = form.get('prefix', '').strip()
+    compress_str = form.get('compress', 'false').strip().lower()
     compress     = compress_str in ('true', '1', 'yes')
-
-    text   = request.form.get('Body', '')
-    sender = request.form.get('From')
-    print(f"From: {sender}, Body: {text}")
-    print(f"Prefix: '{prefix}', Compress: {compress}")
-
-    manage_str = request.form.get('manage', 'false').strip().lower()
+    manage_str = form.get('manage', 'false').strip().lower()
     manage     = manage_str in ('true', '1', 'yes')
-    print(f"Manage: {manage!r}, Prefix: {prefix!r}, Compress: {compress}")
-
-    archive_str  = request.form.get('archive', 'false').strip().lower()
+    archive_str  = form.get('archive', 'false').strip().lower()
     archive      = archive_str in ('true', '1', 'yes')
-    print(f"Archive: {archive!r}")
 
-    rm_dir_param = request.form.get('rm_dir', '').strip()
+    text   = form.get('Body', '')
+    sender = form.get('From')
+    print(f"From: {sender}")
+    print(f"Body: {text}")
+    print(f"Prefix: {prefix}")
+    print(f"Compress:{compress}")
+    print(f"Archive: {archive}")
+    print(f"Manage: {manage}")
+
+    rm_dir_param = form.get('rm_dir', '').strip()
     rm_dir       = rm_dir_param or DEFAULT_RM_DIR
 
     match = re.search(r'https?://[^\s]+', text)
@@ -255,12 +251,18 @@ def webhook():
             subprocess.run(["rmapi", "put", local_path, rm_dir], check=True)
             uploaded = os.path.join(rm_dir, os.path.basename(local_path))
             print("ℹ️ Uploaded without rename/cleanup:", uploaded)
-
-        return jsonify({'status': 'ok', 'uploaded': uploaded})
+        return
 
     except Exception as e:
         print(f"❌ Exception: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# Webhook endpoint
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    print(">>> Incoming request to /webhook")
+    print("Request headers:", dict(request.headers))
+    Thread(target=process_pdf, args=(request.form,), daemon=True).start()
+    return jsonify({'status': 'accepted'}), 202
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000)
