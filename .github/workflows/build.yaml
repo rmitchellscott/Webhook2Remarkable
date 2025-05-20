@@ -21,7 +21,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/rmitchellscott/Send2Remarkable-sms
+            ghcr.io/rmitchellscott/Webhook2Remarkable
           tags: |
             # branch-based tags (e.g. 'main')
             type=ref,event=branch

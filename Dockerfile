@@ -18,7 +18,9 @@ FROM python:3.13-alpine
 WORKDIR /app
 COPY --from=rmapi-builder /app/rmapi/rmapi /usr/local/bin/rmapi
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Ghostscript + Python deps in one layer
+RUN apk add --no-cache ghostscript \
+ && pip install --no-cache-dir -r requirements.txt
 
 # Copy script
 COPY app.py ./
