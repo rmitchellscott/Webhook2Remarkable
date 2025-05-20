@@ -134,46 +134,46 @@ def cleanup_old(prefix='', rm_dir=DEFAULT_RM_DIR):
         capture_output=True, text=True, check=True
     )
     lines = proc.stdout.splitlines()
-    print(f"[cleanup] raw output ({len(lines)} lines):")
-    for ln in lines:
-        print("   ", repr(ln))
-    print("-" * 60)
+    # print(f"[cleanup] raw output ({len(lines)} lines):")
+    # for ln in lines:
+    #     print("   ", repr(ln))
+    # print("-" * 60)
 
     # 2) process each line
     for idx, line in enumerate(lines):
-        print(f"[cleanup] line {idx}: {repr(line)}")
+        # print(f"[cleanup] line {idx}: {repr(line)}")
         parts = line.split(None, 1)
         if len(parts) != 2 or parts[0] != '[f]':
-            print("  ↳ skipping (not a file entry)")
+            # print("  ↳ skipping (not a file entry)")
             continue
 
         filename = parts[1]
-        print(f"  ↳ filename = {filename!r}")
+        # print(f"  ↳ filename = {filename!r}")
 
         # 3) strip .pdf **only if present**
         if filename.lower().endswith('.pdf'):
             base = filename[:-4]
-            print(f"  ↳ removed '.pdf' → base = {base!r}")
+            # print(f"  ↳ removed '.pdf' → base = {base!r}")
         else:
             base = filename
-            print(f"  ↳ no '.pdf' suffix → base = {base!r}")
+            # print(f"  ↳ no '.pdf' suffix → base = {base!r}")
 
         # 4) drop the prefix text
         if prefix:
             prefix_token = prefix + " "
             if not base.startswith(prefix_token):
-                print(f"  ↳ skipping (doesn't start with prefix '{prefix}')")
+                # print(f"  ↳ skipping (doesn't start with prefix '{prefix}')")
                 continue
             base = base[len(prefix_token):]
-            print(f"  ↳ after dropping prefix → {base!r}")
+            # print(f"  ↳ after dropping prefix → {base!r}")
 
         # 5) extract Month + Day via regex
         m = re.match(r"^([A-Za-z]+)\s+(\d+)$", base)
         if not m:
-            print(f"  ↳ skipping (base not 'Month D' format) → {base!r}")
+            # print(f"  ↳ skipping (base not 'Month D' format) → {base!r}")
             continue
         month_str, day_str = m.groups()
-        print(f"  ↳ month_str = {month_str}, day_str = {day_str}")
+        # print(f"  ↳ month_str = {month_str}, day_str = {day_str}")
 
         # 6) parse into a date, inferring year
         try:
@@ -186,17 +186,17 @@ def cleanup_old(prefix='', rm_dir=DEFAULT_RM_DIR):
         file_date = datetime.date(today.year, month, day)
         if file_date > today:
             file_date = datetime.date(today.year - 1, month, day)
-            print(f"  ↳ adjusted into last year → {file_date}")
-        else:
-            print(f"  ↳ parsed file_date = {file_date}")
+            # print(f"  ↳ adjusted into last year → {file_date}")
+        # else:
+        #     print(f"  ↳ parsed file_date = {file_date}")
 
         # 7) compare against cutoff
         if file_date < cutoff:
             remote_path = os.path.join(rm_dir, filename)
-            print(f"  ↳ Removing {remote_path} (dated {file_date} < {cutoff})")
+            # print(f"  ↳ Removing {remote_path} (dated {file_date} < {cutoff})")
             subprocess.run(["rmapi", "rm", remote_path], check=True)
-        else:
-            print(f"  ↳ Keeping {filename} (dated {file_date} ≥ {cutoff})")
+        # else:
+        #     print(f"  ↳ Keeping {filename} (dated {file_date} ≥ {cutoff})")
 
 
 # Webhook endpoint
@@ -247,7 +247,7 @@ def webhook():
             # 3a. If managing: do your prefix/rename logic (it uploads once, inside rename_and_upload)
             print("📤 Managed upload + rename …")
             uploaded = rename_and_upload(local_path, prefix, rm_dir)
-            cleanup_old(prefix)
+            cleanup_old(prefix, rm_dir)
             print("✅ Managed upload successful:", uploaded)
         else:
             # 3b. If not managing: just one raw upload, no extra rename or cleanup
