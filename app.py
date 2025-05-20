@@ -220,6 +220,10 @@ def webhook():
     manage     = manage_str in ('true', '1', 'yes')
     print(f"Manage: {manage!r}, Prefix: {prefix!r}, Compress: {compress}")
 
+    archive_str  = request.form.get('archive', 'false').strip().lower()
+    archive      = archive_str in ('true', '1', 'yes')
+    print(f"Archive: {archive!r}")
+
     rm_dir_param = request.form.get('rm_dir', '').strip()
     rm_dir       = rm_dir_param or DEFAULT_RM_DIR
 
@@ -230,7 +234,8 @@ def webhook():
 
 
     # 1. Download
-    local_path = download_pdf(match.group(0), tmp=compress, prefix=prefix)
+    local_path = download_pdf(match.group(0), tmp=not archive or compress, prefix=prefix)
+    # local_path = download_pdf(match.group(0), tmp=compress, prefix=prefix)
 
     # 2. Optionally compress
     if compress:
