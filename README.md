@@ -1,3 +1,6 @@
+# Deprecation Notice
+This project has been deprecated and functionality rolled into [Aviary](https://github.com/rmitchellscott/aviary).
+
 # Webhook2Remarkable
 A small Flask app that listens for incoming webhook POSTs containing a PDF URL, downloads the PDF, optionally compresses it with Ghostscript, and uploads it to reMarkable Cloud or [rmfakecloud](https://github.com/ddvk/rmfakecloud) via [rmapi](https://github.com/ddvk/rmapi). It also supports automated rolling cleanup of old files on your device.
 
